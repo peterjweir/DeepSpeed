@@ -273,21 +273,36 @@ DS_D_INLINE __half init<ROpType::Max>()
 template <>
 DS_D_INLINE __half2 init<ROpType::Add>()
 {
-    constexpr __half2_raw zero = {0x0000, 0x0000};
+    //__half2_raw tmp;
+    constexpr float x = 0x0000;
+    constexpr float y = 0x0000;
+    //tmp.x = 0x0000;
+    //tmp.y = 0x0000;
+    __half2_raw zero;
+    zero.x = x;
+    zero.y = y;
     return __half2(zero);
 }
 
 template <>
 DS_D_INLINE __half2 init<ROpType::Min>()
 {
-    constexpr __half2_raw inf = {0x7C00, 0x7C00};
+    constexpr float x = 0x7C00;
+    constexpr float y = 0x7C00;
+    __half2_raw inf;
+    inf.x = x;
+    inf.y = y;
     return __half2(inf);
 }
 
 template <>
 DS_D_INLINE __half2 init<ROpType::Max>()
 {
-    constexpr __half2_raw neg_inf = {0xFC00, 0xFC00};
+    constexpr float x = 0xFC00;
+    constexpr float y = 0xFC00;
+    __half2_raw neg_inf;
+    neg_inf.x = x;
+    neg_inf.y = y;
     return __half2(neg_inf);
 }
 
@@ -407,20 +422,34 @@ DS_D_INLINE void _block(cg::thread_block& tb,
     _warp<Ops...>(warp_arg, data);
 
     // If max_warps == 1 let's skip the runtime check
+#ifdef __HIP_PLATFORM_HCC__
+    if (warp_arg.size() > 1 && total_warps != 1) {
+        if (warp_arg.thread_rank() == 0) {
+#else
     if (warp_arg.meta_group_size() > 1 && total_warps != 1) {
         if (warp_arg.thread_rank() == 0) {
+#endif
 #pragma unroll
             for (int i = 0; i < elems; i++) {
                 mem_access::store_shared<bytes>(
+#ifdef __HIP_PLATFORM_HCC__
+                    reduce_buffer + elems * warp_arg.thread_rank() + i, data + i);
+#else
                     reduce_buffer + elems * warp_arg.meta_group_rank() + i, data + i);
+#endif 
             }
         }
 
         // Synchronization inside block-uniform conditional is safe
         tb.sync();
 
+#ifdef __HIP_PLATFORM_HCC__
+        if (warp_arg.thread_rank() == 0) {
+            if (warp_arg.thread_rank() < warp_arg.size()) {
+#else
         if (warp_arg.meta_group_rank() == 0) {
             if (warp_arg.thread_rank() < warp_arg.meta_group_size()) {
+#endif
 #pragma unroll
                 for (int i = 0; i < elems; i++) {
                     mem_access::load_shared<bytes>(
@@ -444,8 +473,13 @@ DS_D_INLINE void _block(cg::thread_block& tb,
 
 #pragma unroll
         for (int i = 0; i < elems; i++) {
+#ifdef __HIP_PLATFORM_HCC__
+            mem_access::load_shared<bytes>(data + i,
+                                           reduce_buffer + warp_arg.thread_rank() * elems + i);
+#else
             mem_access::load_shared<bytes>(data + i,
                                            reduce_buffer + warp_arg.meta_group_rank() * elems + i);
+#endif
         }
     }
 }
@@ -518,7 +552,11 @@ DS_D_INLINE void partitioned_block(cg::thread_block& tb,
         _warp<Op, num_threads>(warp, &val);
     } else {
         constexpr int num_warps = num_threads / hw_warp_size;
+#ifdef __HIP_PLATFORM_HCC__
+        const int warp_offset = warp.thread_rank() & ~(num_warps - 1);
+#else
         const int warp_offset = warp.meta_group_rank() & ~(num_warps - 1);
+#endif
         _block<num_warps, Op>(tb, warp, &val, warp_offset);
     }
 }
@@ -535,7 +573,11 @@ DS_D_INLINE void partitioned_block(cg::thread_block& tb,
         _warp<Op1, Op2, num_threads>(warp, data);
     } else {
         constexpr int num_warps = num_threads / hw_warp_size;
+#ifdef __HIP_PLATFORM_HCC__
+        const int warp_offset = warp.thread_rank() & ~(num_warps - 1);
+#else
         const int warp_offset = warp.meta_group_rank() & ~(num_warps - 1);
+#endif
         _block<num_warps, Op1, Op2>(tb, warp, data, warp_offset);
     }
 
@@ -556,7 +598,11 @@ DS_D_INLINE void partitioned_block(cg::thread_block& tb,
         _warp<Op1, Op2, Op3, num_threads>(warp, data);
     } else {
         constexpr int num_warps = num_threads / hw_warp_size;
+#ifdef __HIP_PLATFORM_HCC__        
+        const int warp_offset = warp.thread_rank() & ~(num_warps - 1);
+#else
         const int warp_offset = warp.meta_group_rank() & ~(num_warps - 1);
+#endif
         _block<num_warps, Op1, Op2, Op3>(tb, warp, data, warp_offset);
     }
 
@@ -579,7 +625,11 @@ DS_D_INLINE void partitioned_block(cg::thread_block& tb,
         _warp<Op1, Op2, Op3, Op4, num_threads>(warp, data);
     } else {
         constexpr int num_warps = num_threads / hw_warp_size;
+#ifdef __HIP_PLATFORM_HCC__  
+        const int warp_offset = warp.thread_rank() & ~(num_warps - 1);
+#else
         const int warp_offset = warp.meta_group_rank() & ~(num_warps - 1);
+#endif
         _block<num_warps, Op1, Op2, Op3, Op4>(tb, warp, data, warp_offset);
     }
 

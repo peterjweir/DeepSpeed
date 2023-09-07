@@ -71,4 +71,16 @@ class InferenceBuilder(CUDAOpBuilder):
             return []
 
     def include_paths(self):
-        return ['csrc/transformer/inference/includes', 'csrc/includes']
+        import torch
+        import os
+        if self.build_for_cpu:
+            CUDA_INCLUDE = []
+        elif not self.is_rocm_pytorch():
+            CUDA_INCLUDE = [os.path.join(torch.utils.cpp_extension.CUDA_HOME, "include")]
+        else:
+            CUDA_INCLUDE = [
+                os.path.join(torch.utils.cpp_extension.ROCM_HOME, "include"),
+                os.path.join(torch.utils.cpp_extension.ROCM_HOME, "include", "rocrand"),
+                os.path.join(torch.utils.cpp_extension.ROCM_HOME, "include", "hiprand"),
+            ]
+        return ['csrc/transformer/inference/includes', 'csrc/includes'] + CUDA_INCLUDE
